@@ -1,5 +1,4 @@
 # watchdog.py
-
 import asyncio
 import os
 import platform
@@ -9,7 +8,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 from PerfectionBot.config.yamlHandler import get_value
@@ -98,7 +96,7 @@ async def collect_status(bot: discord.Client) -> dict:
     python_version = platform.python_version()
 
     try:
-        version = "1.1.8"
+        version = "1.1.9"
     except Exception:
         version = "unknown"
 
@@ -304,9 +302,6 @@ async def start_monitoring(bot: discord.Client, alert_channel_id: Optional[int] 
         await asyncio.sleep(interval)
 
 
-watchdog_group = app_commands.Group(name="watchdog", description="Watchdog commands")
-
-
 async def _user_is_manager(bot: commands.Bot, member: discord.Member) -> bool:
     try:
         if await bot.is_owner(member):
@@ -324,28 +319,16 @@ async def _user_is_manager(bot: commands.Bot, member: discord.Member) -> bool:
 
     return any(r.id == manager_id for r in member.roles)
 
-
-@watchdog_group.command(name="status", description="Show status of the bot")
-async def watchdog_status(interaction: discord.Interaction):
-    await interaction.response.defer(thinking=True)
-    status = await collect_status(interaction.client)
-    emb = _make_status_embed(status)
-    await interaction.followup.send(embed=emb)
+async def get_status_embed(bot: discord.Client) -> discord.Embed:
+    status = await collect_status(bot)
+    return _make_status_embed(status)
 
 
-@watchdog_group.command(name="reboot", description="Reboots the bot. Useful to remotely restart bot in case of error state")
-async def watchdog_reboot(interaction: discord.Interaction):
-    bot = interaction.client
-    if not isinstance(interaction.user, discord.Member):
-        await interaction.response.send_message("❌ This command must be used in a guild by a member.", ephemeral=True)
-        return
-
-    allowed = await _user_is_manager(bot, interaction.user)
+async def perform_reboot(bot: commands.Bot, member: discord.Member) -> None:
+    allowed = await _user_is_manager(bot, member)
     if not allowed:
-        await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
-        return
+        raise PermissionError("User is not bot manager")
 
-    await interaction.response.send_message("🔄 Rebooting bot...", ephemeral=True)
     cur_dir = os.path.dirname(os.path.abspath(__file__))
     up_dir = os.path.abspath(os.path.join(cur_dir, ".."))
     root_dir = os.path.abspath(os.path.join(up_dir, ".."))
@@ -369,4 +352,3 @@ class WatchdogCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(WatchdogCog(bot))
-    bot.tree.add_command(watchdog_group)

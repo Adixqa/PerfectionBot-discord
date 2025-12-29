@@ -12,10 +12,13 @@ import signal
 from pathlib import Path
 import re
 from typing import Optional
+import aiohttp
+import tempfile
+import os
 
 from PerfectionBot.config.yamlHandler import get_value
 from PerfectionBot.scripts.filter import check_bad
-from PerfectionBot.scripts import watchdog, yt, verify
+from PerfectionBot.scripts import watchdog, yt, verify, bannergenerator
 from PerfectionBot.scripts.lockdown import initiate_lockdown, handle_confirm, handle_revoke
 from PerfectionBot.scripts.log import log_to_channel
 from PerfectionBot.scripts import leveling
@@ -629,6 +632,59 @@ async def appeal_timeouts():
                 if gobj:
                     create_task(log_to_channel(gobj, f"⚪ Appeal timed out for <@{appeal['user_id']}>", discord.Color.dark_grey(), "info"))
 
+watchdog_group = app_commands.Group(name="watchdog", description="Watchdog commands")
+
+
+@watchdog_group.command(name="status", description="Show status of the bot")
+async def watchdog_status(interaction: discord.Interaction):
+    await interaction.response.defer(thinking=True)
+    try:
+        emb = await watchdog.get_status_embed(interaction.client)
+        await interaction.followup.send(embed=emb)
+    except Exception as e:
+        try:
+            await interaction.followup.send("❌ Failed to collect status.", ephemeral=True)
+        except Exception:
+            pass
+        try:
+            if interaction.guild:
+                create_task(log_to_channel(interaction.guild, f"❌ Watchdog status command failed: {e}", discord.Color.red(), "fail"))
+        except Exception:
+            print("Watchdog status command failed:", e)
+
+
+@watchdog_group.command(name="reboot", description="Reboots the bot. Useful to remotely restart bot in case of error state")
+async def watchdog_reboot(interaction: discord.Interaction):
+    bot_client = interaction.client
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message("❌ This command must be used in a guild by a member.", ephemeral=True)
+        return
+
+    try:
+        await watchdog.perform_reboot(bot_client, interaction.user)
+    except PermissionError:
+        await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
+        return
+    except Exception as e:
+        try:
+            await interaction.response.send_message("❌ Failed to perform reboot.", ephemeral=True)
+        except Exception:
+            pass
+        try:
+            if bot_client.guilds:
+                create_task(log_to_channel(bot_client.guilds[0], f"❌ Reboot failed to run: {e}", discord.Color.red(), "fail"))
+        except Exception:
+            print("Reboot failed:", e)
+        return
+
+    await interaction.response.send_message("🔄 Rebooting bot...", ephemeral=True)
+
+
+try:
+    bot.tree.add_command(watchdog_group)
+except Exception:
+    pass
+
 @bot.event
 async def on_ready():
     try:
@@ -636,17 +692,15 @@ async def on_ready():
         print("[on_ready] watchdog.setup succeeded")
     except Exception as e:
         print(f"[on_ready] watchdog.setup failed: {e}")
+
         try:
             await bot.add_cog(watchdog.WatchdogCog(bot))
-            existing = [c.name for c in bot.tree.get_commands()]
-            if watchdog.watchdog_group.name not in existing:
-                try:
-                    bot.tree.add_command(watchdog.watchdog_group)
-                except Exception as e2:
-                    print(f"[on_ready] bot.tree.add_command failed in fallback: {e2}")
-            print("[on_ready] fallback added watchdog cog and group (or group already existed).")
+            print("[on_ready] fallback added watchdog cog.")
         except Exception as e2:
             print(f"[on_ready] fallback adding watchdog cog failed: {e2}")
+
+    print("[DEBUG] tree.get_commands():", [c.name for c in bot.tree.get_commands()])
+    print("[DEBUG] tree.walk_commands():", [c.qualified_name for c in bot.tree.walk_commands()])
 
     try:
         raw = get_value("LOG_ID")
@@ -751,6 +805,107 @@ async def on_ready():
                 print(f"[on_ready] global sync failed: {e}")
     except Exception as e:
         print(f"[on_ready] sync logic failed: {e}")
+
+async def fetchProfIcon(member: discord.Member) -> str:
+    avatar_url = member.avatar.url if member.avatar else member.default_avatar.url
+    file_ext = avatar_url.split('.')[-1]
+    temp_dir = tempfile.gettempdir()
+    temp_file_path = os.path.join(temp_dir, f"{member.id}.{file_ext}")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(avatar_url) as resp:
+            if resp.status == 200:
+                with open(temp_file_path, 'wb') as f:
+                    f.write(await resp.read())
+                return temp_file_path
+            else:
+                return None
+            
+def safe_remove(path):
+    if path and os.path.exists(path):
+        os.remove(path)
+
+@bot.event
+async def on_member_join(member):
+    if not get_value("systems", "welcome"):
+        return
+
+    avatar_path = None
+    banner_path = None
+
+    try:
+        avatar_path = await fetchProfIcon(member)
+        if not avatar_path:
+            return
+
+        banner_path = os.path.join(
+            tempfile.gettempdir(),
+            f"{member.id}_welcome.png"
+        )
+
+        bannergenerator.generate_banner(
+            "Welcome",
+            str(member),
+            avatar_path,
+            banner_path
+        )
+
+        CHNL_ID = int(get_value("WELCOME", "WELCOME_CHANNEL_ID"))
+        msg = get_value("WELCOME", "WELCOME_MESSAGE").replace(
+            "{user}", member.mention
+        )
+
+        channel = bot.get_channel(CHNL_ID) or await bot.fetch_channel(CHNL_ID)
+
+        await channel.send(
+            content=msg,
+            file=discord.File(banner_path)
+        )
+
+    finally:
+        safe_remove(avatar_path)
+        safe_remove(banner_path)
+
+@bot.event
+async def on_member_remove(member):
+    if not get_value("systems", "welcome"):
+        return
+    
+    avatar_path = None
+    banner_path = None
+
+    try:
+        avatar_path = await fetchProfIcon(member)
+        if not avatar_path:
+            return
+
+        banner_path = os.path.join(
+            tempfile.gettempdir(),
+            f"{member.id}_goodbye.png"
+        )
+
+        bannergenerator.generate_banner(
+            "Goodbye",
+            str(member),
+            avatar_path,
+            banner_path
+        )
+
+        CHNL_ID = int(get_value("WELCOME", "WELCOME_CHANNEL_ID"))
+        msg = get_value("WELCOME", "GOODBYE_MESSAGE").replace(
+            "{user}", member.mention
+        )
+
+        channel = bot.get_channel(CHNL_ID) or await bot.fetch_channel(CHNL_ID)
+
+        await channel.send(
+            content=msg,
+            file=discord.File(banner_path)
+        )
+
+    finally:
+        safe_remove(avatar_path)
+        safe_remove(banner_path)
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
@@ -1298,13 +1453,22 @@ async def level_check_cmd(interaction: discord.Interaction, user: Optional[disco
     except Exception:
         xp = xp_memory.get(target.id, 0)
 
-    lvl = await asyncio.to_thread(leveling.convertToLevel, xp)
+    lvl, xp_into, xp_for_next, xp_to_next = await asyncio.to_thread(leveling.get_level_info, xp)
     color = get_level_role_color(target)
 
     embed = discord.Embed(title="📊 Level Info", color=color)
     embed.add_field(name="User", value=target.mention, inline=True)
     embed.add_field(name="Level", value=str(lvl), inline=True)
-    embed.add_field(name="XP", value=str(xp), inline=True)
+
+    if lvl >= leveling.MAX_LEVEL:
+        embed.add_field(name="XP", value=f"{xp} (MAX level reached)", inline=True)
+        bar = leveling.render_progress_bar(1, 1, length=12)
+        embed.add_field(name="Progress", value=bar, inline=False)
+    else:
+        embed.add_field(name="XP", value=f"{xp}", inline=True)
+        bar = leveling.render_progress_bar(xp_into, xp_for_next, length=12)
+        percent = int((xp_into / xp_for_next) * 100) if xp_for_next > 0 else 100
+        embed.add_field(name="Progress", value=f"{bar} {percent}% — {xp_to_next} XP to next level", inline=False)
 
     await interaction.response.send_message(embed=embed)
 
