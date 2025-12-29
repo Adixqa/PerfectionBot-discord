@@ -8,9 +8,10 @@ tokens:
   yt: "YOUR_YT_TOKEN_HERE" #Token used to check for yt uploads, also do NOT share.
 
 systems:
-  filter: true #filtering system
-  leveling: true #leveling system
-  yt: true #youtube monitoring
+  filter: true #Filtering system
+  leveling: true #Leveling system
+  yt: true #Youtube monitoring
+  welcome: true #Welcome members
   
 behaviour:
   COMMAND_PREFIX: "!" #Here what you set will trigger the bot to check for command (for example !clear)
@@ -39,6 +40,12 @@ LEVELING:
     description: " has reached a new level!"
     field: "Progress"
 
+WELCOME:
+  WELCOME_CHANNEL_ID: 0 #Where will the bot send greetings
+  WELCOME_MESSAGE: "{user} joined"
+  GOODBYE_MESSAGE: "{user} left"
+  "SHOW_CARD_ON_ENTER": true #When user joins, bot will send a banner
+  "SHOW_CARD_ON_LEAVE": true #When user leaves, bot will send a banner
 
 youtube:
   target: "https://www.youtube.com/channel/CHANNEL_ID_HERE" #Link to yt channel
@@ -55,7 +62,7 @@ youtube:
     IGNORE_SHORTS: false
     IGNORE_VIDEOS: false
     IGNORE_STREAMS: false
-    IGNORE_POSTS: true #posts checking does not work in this version
+    IGNORE_POSTS: true #Posts checking does not work in this version
     CHECK_INTERVAL: 30 #Check for new uploads every CHECK_INTERVAL s
     ANNOUNCEMENT_CHANNEL_ID: "" #Channel where bot will announce uploads
 

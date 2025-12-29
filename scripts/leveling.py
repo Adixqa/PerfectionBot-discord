@@ -1,5 +1,3 @@
-# PerfectionBot/scripts/leveling.py
-
 from pathlib import Path
 import os
 from PerfectionBot.config.yamlHandler import get_value
@@ -25,6 +23,7 @@ def ensure_file():
     FILE.parent.mkdir(parents=True, exist_ok=True)
     FILE.touch(exist_ok=True)
 
+
 def read_xp(id: int) -> int:
     ensure_file()
     with FILE.open("r", encoding="utf-8") as f:
@@ -39,6 +38,7 @@ def read_xp(id: int) -> int:
                 except ValueError:
                     return 0
     return 0
+
 
 def write_xp(id: int, value: int):
     ensure_file()
@@ -68,9 +68,10 @@ def write_xp(id: int, value: int):
     with FILE.open("w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
-def convertToLevel(xp: int) -> int:
+
+def get_level_info(xp: int):
     if xp < 0:
-        return 0
+        return 0, 0, XP_INCREMENTS[0], XP_INCREMENTS[0]
 
     level = 0
     remaining_xp = xp
@@ -80,7 +81,10 @@ def convertToLevel(xp: int) -> int:
             remaining_xp -= inc
             level += 1
         else:
-            return level
+            xp_into_current = remaining_xp
+            xp_for_next = inc
+            xp_to_next = inc - remaining_xp
+            return min(level, MAX_LEVEL), xp_into_current, xp_for_next, xp_to_next
 
     while level < MAX_LEVEL:
         next_inc = XP_INCREMENTS[-1] + XP_EXTRA_STEP * (level - len(XP_INCREMENTS) + 1)
@@ -88,9 +92,27 @@ def convertToLevel(xp: int) -> int:
             remaining_xp -= next_inc
             level += 1
         else:
-            break
+            xp_into_current = remaining_xp
+            xp_for_next = next_inc
+            xp_to_next = next_inc - remaining_xp
+            return min(level, MAX_LEVEL), xp_into_current, xp_for_next, xp_to_next
 
-    return min(level, MAX_LEVEL)
+    return MAX_LEVEL, 0, 0, 0
+
+
+def convertToLevel(xp: int) -> int:
+    level, _, _, _ = get_level_info(xp)
+    return level
+
+
+def render_progress_bar(current: int, total: int, length: int = 12) -> str:
+    if total <= 0:
+        return "█" * length
+    fraction = max(0.0, min(1.0, current / total))
+    filled = int(fraction * length)
+    empty = length - filled
+    return "█" * filled + "░" * empty
+
 
 def read_level_roles():
     if not ROLE_CONF.exists():
@@ -111,6 +133,7 @@ def read_level_roles():
                 continue
 
     return sorted(roles, key=lambda x: x[0])
+
 
 async def check_level_reward(member, new_level: int):
     roles = read_level_roles()
