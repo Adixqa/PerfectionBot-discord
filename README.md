@@ -229,6 +229,8 @@ ICONS: # Make sure bot can access these
 
 Go to `config/banned-keywords.config` and open it. In each new line you can add a word you want blacklisted
 
+---
+
 ## Commands
 
 This covers commands for versions above 1.1.7.
